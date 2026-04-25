@@ -4,6 +4,21 @@ const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const http = axios.create({ baseURL: BASE, timeout: 90000 })
 
+// 统一处理错误，把后端 detail 透传出来
+http.interceptors.response.use(
+  res => res,
+  err => {
+    const detail = err?.response?.data?.detail
+    if (detail) err.message = detail
+    return Promise.reject(err)
+  }
+)
+
+export interface VsRow {
+  plan: string
+  actual: string
+}
+
 export interface NewsItem {
   sector: string
   title: string
@@ -34,6 +49,7 @@ export interface DailyReview {
   ai_news_result: NewsItem[]
   industry_summary: string
   // 操作复盘
+  vs_rows: VsRow[]
   best_trade: string
   worst_trade: string
   emotion_state: string
@@ -71,7 +87,7 @@ export const reviewApi = {
     http.patch<DailyReview>(`/api/review/${date}`, data).then(r => r.data),
 }
 
-// ── AI搜索 ────────────────────────────────────────────
+// ── AI ────────────────────────────────────────────────
 export const aiApi = {
   searchNews: (params: {
     sectors: string[]
@@ -79,8 +95,7 @@ export const aiApi = {
     review_date: string
   }) =>
     http.post<{ news: NewsItem[]; summary: string }>(
-      '/api/review/ai/search-news',
-      params,
+      '/api/review/ai/search-news', params,
     ).then(r => r.data),
 
   generateArticles: (reviewDate: string) =>

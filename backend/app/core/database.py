@@ -29,7 +29,7 @@ async def get_db():
 
 
 async def init_db():
-    """建表"""
+    """建表（自动创建所有已注册的模型）"""
     async with engine.begin() as conn:
-        from app.models import daily_review  # noqa: 触发模型注册
+        from app.models import daily_review, trade  # noqa 触发模型注册
         await conn.run_sync(Base.metadata.create_all)

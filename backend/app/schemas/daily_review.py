@@ -3,16 +3,20 @@ from datetime import date, datetime
 from typing import Optional, List, Any
 
 
-# ── 新闻条目 ──────────────────────────────────────
 class NewsItem(BaseModel):
     sector: str
     title: str
     source: str
-    sentiment: str          # positive / negative / neutral
-    sentiment_label: str    # 利好 / 利空 / 中性
+    sentiment: str
+    sentiment_label: str
 
 
-# ── 创建/更新请求 ─────────────────────────────────
+class VsRow(BaseModel):
+    """计划vs实际对比的一行"""
+    plan: str = ""
+    actual: str = ""
+
+
 class DailyReviewCreate(BaseModel):
     date: date
 
@@ -39,6 +43,7 @@ class DailyReviewCreate(BaseModel):
     industry_summary: str = ""
 
     # 操作复盘
+    vs_rows: List[VsRow] = []
     best_trade: str = ""
     worst_trade: str = ""
     emotion_state: str = ""
@@ -49,11 +54,9 @@ class DailyReviewCreate(BaseModel):
 
 
 class DailyReviewUpdate(DailyReviewCreate):
-    """更新时date可选（URL已携带日期）"""
     date: Optional[date] = None
 
 
-# ── 响应 ──────────────────────────────────────────
 class DailyReviewOut(DailyReviewCreate):
     id: int
     created_at: datetime
@@ -63,11 +66,10 @@ class DailyReviewOut(DailyReviewCreate):
         from_attributes = True
 
 
-# ── AI搜索请求 ────────────────────────────────────
 class AISearchRequest(BaseModel):
     sectors: List[str] = Field(..., description="关注的板块列表")
     extra_keywords: str = Field("", description="补充关键词")
-    review_date: date = Field(..., description="复盘日期，用于日期限定搜索")
+    review_date: date = Field(..., description="复盘日期")
 
 
 class AISearchResponse(BaseModel):
@@ -75,7 +77,6 @@ class AISearchResponse(BaseModel):
     summary: str
 
 
-# ── 文章生成 ──────────────────────────────────────
 class ArticleGenerateRequest(BaseModel):
     review_date: date
     frameworks: List[str] = ["resonance", "methodology", "reflection"]

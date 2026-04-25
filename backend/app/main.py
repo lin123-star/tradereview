@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import init_db
-from app.api import daily_review
+from app.api import daily_review, trade
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TradeReview Pro API",
+    description="AI增强交易复盘系统",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -38,6 +39,7 @@ app.add_middleware(
 )
 
 app.include_router(daily_review.router)
+app.include_router(trade.router)
 
 
 @app.exception_handler(Exception)

@@ -1,7 +1,7 @@
 """
 AI服务层 - 使用 Gemini API
-- search_industry_news: Gemini + Google Search 搜索产业动态
-- generate_articles: Gemini 生成三框架文章
+- search_industry_news: Gemini + Google Search 搜索今日产业动态
+- generate_articles: Gemini 生成三框架公众号文章
 """
 import json
 import logging
@@ -21,10 +21,12 @@ def _gemini_url(endpoint: str) -> str:
 
 
 def _proxy_client(timeout: int = 60) -> httpx.AsyncClient:
+    """国内需要走代理访问 Gemini"""
     if settings.PROXY_URL:
-        proxies = {"http://": settings.PROXY_URL, "https://": settings.PROXY_URL}
         logger.debug(f"使用代理: {settings.PROXY_URL}")
-        return httpx.AsyncClient(proxy="http://127.0.0.1:7897", timeout=timeout)
+        # httpx 0.28+ 用 proxy 单参数，旧版用 proxies 字典
+        # 统一用 proxy 参数兼容新版
+        return httpx.AsyncClient(proxy=settings.PROXY_URL, timeout=timeout)
     logger.debug("未配置代理，直连")
     return httpx.AsyncClient(timeout=timeout)
 
@@ -34,40 +36,58 @@ async def search_industry_news(
     extra_keywords: str,
     review_date: date,
 ) -> dict:
+    """
+    调用 Gemini + Google Search 搜索今日相关板块产业信息
+    返回 {"news": [...], "summary": "..."}
+    """
     logger.info(f"开始搜索产业信息 | 板块: {sectors} | 日期: {review_date}")
 
     if not settings.GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY 未配置，请检查 .env 文件")
 
     date_str = review_date.strftime("%Y年%m月%d日")
+    date_en = review_date.strftime("%Y-%m-%d")
     sector_str = "、".join(sectors)
     keyword_str = f"，补充关注：{extra_keywords}" if extra_keywords else ""
 
     prompt = f"""你是一个专业的A股产业信息分析师。
-请搜索{date_str}以下板块的重要产业动态：{sector_str}{keyword_str}
 
-重点关注：政策消息、销售数据、产业链动态、机构观点、龙头公司动态。
+今天是{date_str}（{date_en}）。
+
+请使用 google_search 搜索**今日**（{date_str}）以下A股板块的重要产业动态：
+{sector_str}{keyword_str}
+
+搜索要求：
+1. 搜索时间范围严格限定在今日（{date_str}）或最近24小时内
+2. 优先使用以下关键词搜索："{sector_str} {date_en}"、"{sector_str} 今日"
+3. 如果今日暂无相关信息，可返回最近2个交易日内的信息，但必须在 source 里注明具体日期
+4. 重点关注：政策消息、销售/产量数据、产业链动态、机构研报观点、龙头公司公告
+5. 不要编造信息，没有就是没有
 
 严格按以下JSON格式返回，不要输出任何其他内容，不要加markdown代码块：
 {{
   "news": [
     {{
       "sector": "板块名称",
-      "title": "新闻标题（30字以内）",
-      "source": "来源名称",
+      "title": "新闻标题（30字以内，包含具体数据或事件名称）",
+      "source": "来源名称 · 具体日期",
       "sentiment": "positive或negative或neutral",
       "sentiment_label": "利好或利空或中性"
     }}
   ],
-  "summary": "产业信息综合摘要100-150字，重点说明对持仓的影响判断"
+  "summary": "产业信息综合摘要100-150字，说明今日各板块核心变化及对持仓的影响判断"
 }}
-每个板块返回2-3条最重要的信息。"""
+
+注意：
+- 每个板块返回2-3条，按重要性排序
+- 如果某个板块今日确实没有重要消息，不返回该板块条目，不要编造
+- title 里尽量包含具体数字或事件名称，不要写空洞标题"""
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
         "generationConfig": {
-            "temperature": 0.3,
+            "temperature": 0.1,
             "maxOutputTokens": 2000,
         },
     }
@@ -101,9 +121,9 @@ async def search_industry_news(
         logger.debug(f"Gemini 返回文本前300字: {raw[:300]}")
     except (KeyError, IndexError) as e:
         logger.error(f"解析 Gemini 响应结构失败: {e}\n完整响应: {json.dumps(data, ensure_ascii=False)}")
-        raise RuntimeError(f"Gemini 响应格式异常，无法提取文本")
+        raise RuntimeError("Gemini 响应格式异常，无法提取文本")
 
-    # 清理 markdown 后解析 JSON
+    # 清理 markdown 代码块后解析 JSON
     try:
         cleaned = raw
         if "```" in cleaned:
@@ -125,6 +145,10 @@ async def search_industry_news(
 
 
 async def generate_articles(review_data: dict) -> list[dict]:
+    """
+    根据完整复盘数据生成三框架公众号文章
+    返回 [{"framework": "...", "title": "...", "content": "..."}]
+    """
     logger.info(f"开始生成文章 | 日期: {review_data.get('date')}")
 
     if not settings.GEMINI_API_KEY:
@@ -138,7 +162,7 @@ async def generate_articles(review_data: dict) -> list[dict]:
             "name": "散户共鸣",
             "instruction": (
                 "用第一人称写作，语气诚实且略带自嘲。"
-                "讲述自己的交易经历时要有情感张力，"
+                "把今日的真实交易经历讲成一个有情感张力的故事，"
                 "重点放在情绪波动和心理活动，让普通散户产生强烈共鸣。"
                 "结尾用一个开放性问题邀请读者互动。"
                 "避免教训说教味，保持真实感。800-1000字。"
