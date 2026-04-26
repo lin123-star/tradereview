@@ -1,19 +1,21 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import DailyReviewView from '@/views/DailyReviewView.vue'
+import DashboardView from '@/views/DashboardView.vue'
+import PlanView from '@/views/PlanView.vue'
 import TradeView from '@/views/TradeView.vue'
+import AuditView from '@/views/AuditView.vue'
+import DailyReviewView from '@/views/DailyReviewView.vue'
+import ArticleView from '@/views/ArticleView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', redirect: '/review' },
-    { path: '/review',  name: 'review',  component: DailyReviewView },
-    { path: '/trade',   name: 'trade',   component: TradeView },
-    // 占位页，后续开发
-    { path: '/dashboard', name: 'dashboard', component: DailyReviewView },
-    { path: '/plan',      name: 'plan',      component: DailyReviewView },
-    { path: '/audit',     name: 'audit',     component: DailyReviewView },
-    { path: '/article',   name: 'article',   component: DailyReviewView },
-    { path: '/data',      name: 'data',      component: DailyReviewView },
+    { path: '/',          redirect: '/dashboard' },
+    { path: '/dashboard', name: 'dashboard', component: DashboardView },
+    { path: '/plan',      name: 'plan',      component: PlanView },
+    { path: '/trade',     name: 'trade',     component: TradeView },
+    { path: '/audit',     name: 'audit',     component: AuditView },
+    { path: '/review',    name: 'review',    component: DailyReviewView },
+    { path: '/article',   name: 'article',   component: ArticleView },
     { path: '/history',   name: 'history',   component: TradeView },
   ],
 })

@@ -1,8 +1,9 @@
 import logging
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, func, and_
 from app.models.trade import Trade
 from app.schemas.trade import TradeStep1, TradeStep2, TradeQuery
 
@@ -13,7 +14,7 @@ class TradeService:
 
     @staticmethod
     async def create(db: AsyncSession, data: TradeStep1) -> Trade:
-        """Step1：创建交易记录，入场信息锁定"""
+        """Step1：创建交易记录，入场信息锁定，后台触发行情快照"""
         trade = Trade(
             symbol=data.symbol.upper().strip(),
             name=data.name,
@@ -34,11 +35,29 @@ class TradeService:
         await db.commit()
         await db.refresh(trade)
         logger.info(f"创建交易记录: {trade.symbol} {trade.direction} @ {trade.entry_price}")
+
+        # 后台异步触发入场快照（不阻塞主流程）
+        asyncio.create_task(
+            TradeService._trigger_entry_snapshot(trade.id)
+        )
         return trade
 
     @staticmethod
+    async def _trigger_entry_snapshot(trade_id: int):
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.services.snapshot_service import SnapshotService
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Trade).where(Trade.id == trade_id))
+                trade = result.scalar_one_or_none()
+                if trade:
+                    await SnapshotService.create_entry_snapshot(db, trade)
+        except Exception as e:
+            logger.error(f"入场快照后台任务失败: {e}")
+
+    @staticmethod
     async def complete(db: AsyncSession, trade_id: int, data: TradeStep2) -> Trade:
-        """Step2：填写出场信息，计算盈亏"""
+        """Step2：填写出场信息，计算盈亏，触发出场快照"""
         trade = await TradeService.get_by_id(db, trade_id)
         if not trade:
             raise ValueError(f"交易记录 {trade_id} 不存在")
@@ -55,20 +74,35 @@ class TradeService:
         trade.hypothesis = data.hypothesis
         trade.uncertainty = data.uncertainty
         trade.status = "closed"
-
-        # 计算盈亏
         trade.pnl_amount, trade.pnl_ratio = TradeService._calc_pnl(trade)
-        logger.info(f"完成交易: {trade.symbol} 盈亏={trade.pnl_amount:.2f}元 {trade.pnl_ratio:.2%}")
 
+        logger.info(f"完成交易: {trade.symbol} 盈亏={trade.pnl_amount:.2f}元")
         await db.commit()
         await db.refresh(trade)
+
+        # 后台异步触发出场快照
+        asyncio.create_task(
+            TradeService._trigger_exit_snapshot(trade.id)
+        )
         return trade
+
+    @staticmethod
+    async def _trigger_exit_snapshot(trade_id: int):
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.services.snapshot_service import SnapshotService
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Trade).where(Trade.id == trade_id))
+                trade = result.scalar_one_or_none()
+                if trade:
+                    await SnapshotService.create_exit_snapshot(db, trade)
+        except Exception as e:
+            logger.error(f"出场快照后台任务失败: {e}")
 
     @staticmethod
     async def update_review_status(
         db: AsyncSession, trade_id: int, review_status: str
     ) -> Trade:
-        """更新审讯状态: pending / reviewing / done"""
         trade = await TradeService.get_by_id(db, trade_id)
         if not trade:
             raise ValueError(f"交易记录 {trade_id} 不存在")
@@ -84,7 +118,6 @@ class TradeService:
 
     @staticmethod
     async def get_list(db: AsyncSession, query: TradeQuery) -> tuple[list[Trade], int]:
-        """查询交易列表，返回 (列表, 总数)"""
         conditions = []
         if query.status:
             conditions.append(Trade.status == query.status)
@@ -95,8 +128,6 @@ class TradeService:
         if query.start_date:
             conditions.append(Trade.entry_time >= query.start_date)
         if query.end_date:
-            # 包含 end_date 当天
-            from datetime import timedelta
             end_dt = datetime.combine(query.end_date, datetime.max.time())
             conditions.append(Trade.entry_time <= end_dt)
 
@@ -104,23 +135,18 @@ class TradeService:
         if conditions:
             base_q = base_q.where(and_(*conditions))
 
-        # 总数
-        from sqlalchemy import func
         count_q = select(func.count()).select_from(base_q.subquery())
         total = (await db.execute(count_q)).scalar()
 
-        # 分页
         result = await db.execute(
             base_q.order_by(Trade.entry_time.desc())
             .offset(query.offset)
             .limit(query.limit)
         )
-        trades = result.scalars().all()
-        return list(trades), total
+        return list(result.scalars().all()), total
 
     @staticmethod
     async def get_pending_review(db: AsyncSession) -> list[Trade]:
-        """获取所有待复盘的已出场交易"""
         result = await db.execute(
             select(Trade)
             .where(Trade.status == "closed", Trade.review_status == "pending")
@@ -130,31 +156,22 @@ class TradeService:
 
     @staticmethod
     async def delete(db: AsyncSession, trade_id: int) -> bool:
-        """删除交易记录（仅允许删除 open 状态）"""
         trade = await TradeService.get_by_id(db, trade_id)
         if not trade:
             return False
         if trade.status == "closed":
-            raise ValueError("已出场的交易记录不允许删除，请联系管理员")
+            raise ValueError("已出场的交易记录不允许删除")
         await db.delete(trade)
         await db.commit()
-        logger.info(f"删除交易记录: id={trade_id}")
         return True
 
     @staticmethod
     def _calc_pnl(trade: Trade) -> tuple[float, float]:
-        """计算盈亏金额和比例"""
         if not trade.exit_price or not trade.entry_price:
             return 0.0, 0.0
-
         if trade.direction in ("buy", "add"):
             pnl_ratio = (trade.exit_price - trade.entry_price) / trade.entry_price
         else:
-            # sell/reduce：空头逻辑
             pnl_ratio = (trade.entry_price - trade.exit_price) / trade.entry_price
-
-        # 简化盈亏金额：用仓位比例 * 10万基准仓计算，实际使用时可接入真实资金
-        base_amount = trade.position_ratio * 100000
-        pnl_amount = base_amount * pnl_ratio
-
+        pnl_amount = trade.position_ratio * 100000 * pnl_ratio
         return round(pnl_amount, 2), round(pnl_ratio, 4)

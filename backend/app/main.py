@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import init_db
-from app.api import daily_review, trade
+from app.api import daily_review, trade, socratic, daily_plan, dashboard, snapshot, strategy
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -40,6 +40,11 @@ app.add_middleware(
 
 app.include_router(daily_review.router)
 app.include_router(trade.router)
+app.include_router(socratic.router)
+app.include_router(daily_plan.router)
+app.include_router(dashboard.router)
+app.include_router(snapshot.router)
+app.include_router(strategy.router)
 
 
 @app.exception_handler(Exception)

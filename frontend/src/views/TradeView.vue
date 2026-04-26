@@ -105,14 +105,10 @@
                   </el-radio-group>
                 </el-form-item>
 
-                <el-form-item label="策略类型">
-                  <el-radio-group v-model="step1Form.strategy">
-                    <el-radio-button value="trend">趋势跟踪</el-radio-button>
-                    <el-radio-button value="reversal">反转</el-radio-button>
-                    <el-radio-button value="news">消息面</el-radio-button>
-                    <el-radio-button value="quant">量化信号</el-radio-button>
-                    <el-radio-button value="other">其他</el-radio-button>
-                  </el-radio-group>
+                <el-form-item label="策略标签">
+                  <StrategySelector
+                    v-model="step1Form.strategy_tag_id"
+                  />
                 </el-form-item>
 
                 <el-form-item label="市场环境">
@@ -352,7 +348,13 @@
           v-loading="loading"
           stripe
           style="width:100%"
+          row-key="id"
         >
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <TradeSnapshotPanel :trade-id="row.id" />
+            </template>
+          </el-table-column>        
           <el-table-column label="标的" width="130">
             <template #default="{ row }">
               <div class="sym-block">
@@ -475,6 +477,8 @@ import { Lock, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useTradeStore } from '@/stores/trade'
 import type { TradeOut, TradeStep1Form, TradeStep2Form } from '@/api/trade'
+import StrategySelector from '@/components/StrategySelector.vue'
+import TradeSnapshotPanel from '@/components/TradesnapshotPanel.vue'
 
 const store = useTradeStore()
 const { trades, loading, submitting } = store.$state as any
@@ -488,7 +492,7 @@ const openTrades = computed(() => store.trades.filter(t => t.status === 'open'))
 const closedTrades = computed(() => store.trades.filter(t => t.status === 'closed'))
 
 // ── Step1 表单 ────────────────────────────────────────
-const step1Form = ref<TradeStep1Form>({
+const step1Form = ref<TradeStep1Form & { strategy_tag_id: number | null }>({
   symbol: '',
   name: '',
   direction: 'buy',
@@ -500,6 +504,7 @@ const step1Form = ref<TradeStep1Form>({
   strategy: '',
   emotion: 'calm',
   review_date: new Date().toISOString().slice(0, 10),
+  strategy_tag_id: null,
 })
 
 const step1Rules = {
@@ -528,6 +533,7 @@ function resetStep1() {
     position_ratio: 0.05, entry_logic: '', market_env: '',
     strategy: '', emotion: 'calm',
     review_date: new Date().toISOString().slice(0, 10),
+    strategy_tag_id: null,
   }
 }
 

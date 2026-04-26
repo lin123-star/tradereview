@@ -6,3 +6,4 @@ pydantic
 pydantic-settings
 python-dotenv
 httpx
+akshare>=1.12.0
